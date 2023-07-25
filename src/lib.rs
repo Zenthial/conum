@@ -1,17 +1,11 @@
 // Credit: https://mathsanew.com/articles/implementing_large_integers_introduction.pdf
 
 #![deny(clippy::pedantic, clippy::perf, clippy::style, clippy::unwrap_used)]
-#![allow(unused)]
+// #![allow(unused)]
 
 use std::cmp::Ordering;
 use std::fmt::Display;
-use std::ops::{Add, AddAssign, Sub, SubAssign};
-
-pub enum Comp {
-    Eq,
-    Ge,
-    Le,
-}
+use std::ops::{Add, AddAssign, Div, Mul, Sub, SubAssign};
 
 // const B: u64 = u32::MAX as u64;
 const B: u64 = 10;
@@ -41,7 +35,6 @@ impl<const WIDTH: usize> Num<WIDTH> {
     pub fn new(digits: &[u32]) -> Self {
         let mut dig = [0_u32; WIDTH];
 
-        // digits.reverse();
         for (i, d) in digits.iter().enumerate() {
             dig[WIDTH - (digits.len() - i)] = *d;
         }
@@ -86,12 +79,54 @@ impl<const WIDTH: usize> Num<WIDTH> {
 
         self.msd.cmp(&other.msd)
     }
+
+    fn mul_digit(&self, s: u32, r: &mut Self) {
+        let mut carry = 0_u64;
+        if s == 0 {
+            return;
+        }
+
+        let s_conv = u64::from(s);
+        for i in (self.msd..WIDTH).rev() {
+            let d = u64::from(self.digits[i]) * s_conv + carry;
+
+            carry = d / B;
+            r.digits[i] = u32::try_from(d % B).expect("modulo failed");
+        }
+
+        if carry == 0 {
+            r.msd = self.msd;
+        } else {
+            assert!(self.msd != 0, "multiply_digit overflow");
+
+            r.digits[self.msd - 1] = u32::try_from(carry).expect("yo");
+            r.msd = self.msd - 1;
+        }
+    }
+
+    fn shift_left(&mut self, n: usize) {
+        assert!(self.msd >= n, "shift left overflow");
+        if self.msd == WIDTH {
+            // equals zero
+            return;
+        }
+
+        let len = self.len();
+        let base = self.msd - n;
+        self.digits.copy_within(self.msd.., base);
+        self.digits[self.msd - n + len..].fill(0);
+        self.msd = base;
+    }
 }
 
 impl<const WIDTH: usize> Add for Num<WIDTH> {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
+        if rhs.len() > self.len() {
+            return rhs.add(self);
+        }
+
         let mut r: Num<WIDTH> = Self::new(&[]);
         let mut carry = false;
 
@@ -188,6 +223,27 @@ impl<const WIDTH: usize> SubAssign for Num<WIDTH> {
     }
 }
 
+impl<const WIDTH: usize> Mul for Num<WIDTH> {
+    type Output = Self;
+
+    fn mul(self, rhs: Self) -> Self::Output {
+        if self.len() < rhs.len() {
+            return rhs.mul(self);
+        }
+
+        let mut big_r: Num<WIDTH> = Self::new(&[]);
+        let mut r: Num<WIDTH> = Self::new(&[]);
+        self.mul_digit(rhs.digits[WIDTH - 1], &mut big_r);
+        for i in (self.msd..WIDTH).rev() {
+            self.mul_digit(rhs.digits[i], &mut big_r);
+            big_r.shift_left(WIDTH - 1 - i);
+            r = r + big_r.clone();
+        }
+
+        r
+    }
+}
+
 impl<const WIDTH: usize> From<u32> for Num<WIDTH> {
     fn from(n: u32) -> Self {
         let digits = to_digits(n);
@@ -266,6 +322,14 @@ mod tests {
     }
 
     #[test]
+    fn test_add_empty() {
+        let num1: Num<200> = Num::from(123);
+        let num2: Num<200> = Num::new(&[]);
+        let expected_result: Num<200> = Num::from(123);
+        assert_eq!((num1 + num2).digits, expected_result.digits);
+    }
+
+    #[test]
     fn test_add_assign() {
         let mut num1: Num<200> = Num::from(123);
         let num2: Num<200> = Num::from(123);
@@ -304,6 +368,39 @@ mod tests {
         let num2: Num<200> = Num::from(123);
         let expected_result: Num<200> = Num::from(129 + 123);
         assert_eq!((num1 + num2).digits, expected_result.digits);
+    }
+
+    #[test]
+    fn test_mul_digit() {
+        let num1: Num<10> = Num::from(55);
+        let mut r: Num<10> = Num::new(&[]);
+        let expected_result: Num<10> = Num::from(55 * 9);
+        num1.mul_digit(9, &mut r);
+        assert_eq!(r.digits, expected_result.digits);
+    }
+
+    #[test]
+    fn test_shift_left() {
+        let mut num1: Num<10> = Num::from(55);
+        let expected_result: Num<10> = Num::from(5500);
+        num1.shift_left(2);
+        assert_eq!(num1.digits, expected_result.digits);
+    }
+
+    #[test]
+    fn test_shift_left_2() {
+        let mut num1: Num<10> = Num::from(5);
+        let expected_result: Num<10> = Num::from(50);
+        num1.shift_left(1);
+        assert_eq!(num1.digits, expected_result.digits);
+    }
+
+    #[test]
+    fn test_mul() {
+        let num1: Num<10> = Num::from(5);
+        let num2: Num<10> = Num::from(5);
+        let expected_result: Num<10> = Num::from(5 * 5);
+        assert_eq!((num1 * num2).digits, expected_result.digits);
     }
 
     #[test]
