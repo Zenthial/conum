@@ -1,6 +1,17 @@
-#![deny(clippy::pedantic, clippy::perf, clippy::style)]
+// Credit: https://mathsanew.com/articles/implementing_large_integers_introduction.pdf
+
+#![deny(clippy::pedantic, clippy::perf, clippy::style, clippy::unwrap_used)]
 #![allow(unused)]
-use std::ops::{Add, Sub};
+
+use std::cmp::Ordering;
+use std::fmt::Display;
+use std::ops::{Add, AddAssign, Sub, SubAssign};
+
+pub enum Comp {
+    Eq,
+    Ge,
+    Le,
+}
 
 // const B: u64 = u32::MAX as u64;
 const B: u64 = 10;
@@ -18,6 +29,7 @@ fn to_digits(n: u32) -> Vec<u32> {
     xs
 }
 
+#[derive(Clone)]
 pub struct Num<const WIDTH: usize> {
     pub(crate) digits: Box<[u32; WIDTH]>,
     pub(crate) msd: usize,
@@ -49,6 +61,30 @@ impl<const WIDTH: usize> Num<WIDTH> {
                 break;
             }
         }
+    }
+
+    fn len(&self) -> usize {
+        WIDTH - self.msd
+    }
+
+    fn cmp(&self, other: &Self) -> Ordering {
+        if self.msd == other.msd {
+            let self_digits = self.digits.iter();
+            let other_digits = other.digits.iter();
+            let zip = self_digits.zip(other_digits);
+
+            for (s, o) in zip {
+                match s.cmp(o) {
+                    Ordering::Less => return Ordering::Less,
+                    Ordering::Greater => return Ordering::Greater,
+                    Ordering::Equal => {}
+                }
+            }
+
+            return Ordering::Equal;
+        }
+
+        self.msd.cmp(&other.msd)
     }
 }
 
@@ -97,12 +133,24 @@ impl<const WIDTH: usize> Add for Num<WIDTH> {
     }
 }
 
+impl<const WIDTH: usize> AddAssign for Num<WIDTH> {
+    fn add_assign(&mut self, rhs: Self) {
+        let c = self.clone();
+        *self = c.add(rhs);
+    }
+}
+
 impl<const WIDTH: usize> Sub for Num<WIDTH> {
     type Output = Self;
 
     fn sub(self, rhs: Num<WIDTH>) -> Self::Output {
         let mut r: Num<WIDTH> = Self::new(&[]);
         let mut borrow = false;
+        let mut neg = false;
+
+        if let Ordering::Less = self.cmp(&rhs) {
+            neg = true;
+        }
 
         for i in (self.msd..WIDTH).rev() {
             let mut d = i64::from(self.digits[i]);
@@ -118,7 +166,7 @@ impl<const WIDTH: usize> Sub for Num<WIDTH> {
 
                 if d < 0 {
                     borrow = true;
-                    d += i64::try_from(B).unwrap(); // will never fail
+                    d += i64::try_from(B).expect("impossible to fail");
                 } else {
                     borrow = false;
                 }
@@ -128,7 +176,15 @@ impl<const WIDTH: usize> Sub for Num<WIDTH> {
         }
 
         r.update_msd();
+        r.neg = neg;
         r
+    }
+}
+
+impl<const WIDTH: usize> SubAssign for Num<WIDTH> {
+    fn sub_assign(&mut self, rhs: Self) {
+        let c = self.clone();
+        *self = c.sub(rhs);
     }
 }
 
@@ -154,6 +210,17 @@ impl<const WIDTH: usize> From<String> for Num<WIDTH> {
 impl<const WIDTH: usize> From<&str> for Num<WIDTH> {
     fn from(s: &str) -> Self {
         Self::from(s.to_string())
+    }
+}
+
+impl<const WIDTH: usize> Display for Num<WIDTH> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut s = String::new();
+        for i in self.msd..WIDTH {
+            s += &format!("{}", self.digits[i]);
+        }
+
+        write!(f, "{s}")
     }
 }
 
@@ -199,6 +266,15 @@ mod tests {
     }
 
     #[test]
+    fn test_add_assign() {
+        let mut num1: Num<200> = Num::from(123);
+        let num2: Num<200> = Num::from(123);
+        let expected_result: Num<200> = Num::from(123 + 123);
+        num1 += num2;
+        assert_eq!(num1.digits, expected_result.digits);
+    }
+
+    #[test]
     fn test_sub() {
         let num1: Num<200> = Num::from(123);
         let num2: Num<200> = Num::from(100);
@@ -207,10 +283,38 @@ mod tests {
     }
 
     #[test]
+    fn test_sub_assign() {
+        let mut num1: Num<200> = Num::from(123);
+        let num2: Num<200> = Num::from(100);
+        let expected_result: Num<200> = Num::from(123 - 100);
+        num1 -= num2;
+        assert_eq!(num1.digits, expected_result.digits);
+    }
+
+    #[test]
+    fn test_sub_underflow() {
+        let num1: Num<200> = Num::from(123);
+        let num2: Num<200> = Num::from(100);
+        assert!((num2 - num1).neg);
+    }
+
+    #[test]
     fn test_add_overflow() {
         let num1: Num<200> = Num::from(129);
         let num2: Num<200> = Num::from(123);
         let expected_result: Num<200> = Num::from(129 + 123);
         assert_eq!((num1 + num2).digits, expected_result.digits);
+    }
+
+    #[test]
+    fn assert_len() {
+        let n: Num<5> = Num::from(100);
+        assert_eq!(n.len(), 3);
+    }
+
+    #[test]
+    fn assert_print() {
+        let n: Num<5> = Num::from(100);
+        assert_eq!(format!("The number is: {n}"), "The number is: 100");
     }
 }
