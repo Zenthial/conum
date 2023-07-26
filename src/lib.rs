@@ -118,6 +118,13 @@ impl<const N: usize> Num<N> {
         self.msd = base;
     }
 
+    fn prefix(&mut self, src: &[u32]) {
+        self.msd = self.msd - src.len();
+        for i in self.msd..self.msd + src.len() {
+            self.digits[i] = src[i - self.msd];
+        }
+    }
+
     fn is_zero(&self) -> bool {
         self.msd == (N - 1)
     }
@@ -248,12 +255,43 @@ impl<const N: usize> Mul for Num<N> {
     }
 }
 
+fn yz_from_x<const N: usize>(x: &Num<N>, w: usize) -> u32 {
+    let iy = N - w;
+    let y;
+    let z;
+
+    if iy >= x.msd {
+        y = x.digits[iy];
+    } else {
+        y = 0;
+    }
+
+    if iy + 1 >= x.msd {
+        z = x.digits[iy + 1];
+    } else {
+        z = 0
+    }
+
+    let b = u32::try_from(B).expect("");
+    y * b + z
+}
+
+fn correct_d_and_subtract<const N: usize>(x: &mut Num<N>, b: &Num<N>, d: &mut u32) {
+    let mut t: Num<N> = Num::from(0);
+    if u64::from(*d) > B - 1 {
+        *d = u32::try_from(B - 1).unwrap();
+    }
+}
+
 impl<const N: usize> Div for Num<N> {
     type Output = (Self, Self);
 
-    fn div(self, divisor: Self) -> Self::Output {
+    fn div(mut self, mut divisor: Self) -> Self::Output {
         let mut qt: Num<N> = Self::from(0);
         let mut rm: Num<N> = Self::from(0);
+        let mut af: Num<N> = Self::from(0);
+        let mut bf: Num<N> = Self::from(0);
+        let mut x: Num<N> = Self::from(0);
 
         if divisor.is_zero() {
             panic!("divide by zero error");
@@ -263,6 +301,43 @@ impl<const N: usize> Div for Num<N> {
             rm = self;
             return (qt, rm);
         }
+
+        let mut e = divisor.digits[divisor.msd];
+        let b = u32::try_from(B).unwrap();
+
+        if divisor.len() > 1 && e < b / 2 {
+            let f = b / (e + 1);
+            self.mul_digit(f, &mut af);
+            divisor.mul_digit(f, &mut bf);
+            self = af;
+            divisor = bf;
+            e = divisor.digits[divisor.msd];
+        }
+
+        let a_len = self.len();
+        let b_len = divisor.len();
+
+        qt.msd = N - (a_len - b_len + 1);
+
+        let mut m = 0;
+        while m < a_len {
+            if m == 0 {
+                m = b_len;
+                x.prefix(&self.digits[self.msd..self.msd + m]);
+            } else {
+                x.shift_left(1);
+                x.digits[N - 1] = self.digits[self.msd + m];
+                m += 1;
+            }
+
+            let yz = yz_from_x(&x, b_len + 1);
+            let mut d = yz / e;
+
+            if b_len > 1 {
+                correct_d_and_subtract(&mut x, &divisor, &mut d);
+            }
+        }
+
         todo!()
     }
 }
@@ -436,6 +511,14 @@ mod tests {
     fn test_msd_zero() {
         let n: Num<5> = Num::from(0);
         assert_eq!(n.msd, 4);
+    }
+
+    #[test]
+    fn test_prefix() {
+        let mut n: Num<5> = Num::from(0);
+        let expected_result: Num<5> = Num::from(1110);
+        n.prefix(&[1, 1, 1]);
+        assert_eq!(n.digits, expected_result.digits);
     }
 
     #[test]
