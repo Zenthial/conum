@@ -2,12 +2,14 @@
 
 #![deny(clippy::pedantic, clippy::perf, clippy::style, clippy::unwrap_used)]
 #![allow(clippy::many_single_char_names)]
+mod num_from;
 mod to_digit;
 
 use std::cmp::Ordering;
 use std::fmt::Display;
 use std::ops::{Add, AddAssign, Div, Mul, MulAssign, Sub, SubAssign};
 
+pub use num_from::NumFrom;
 use to_digit::ToDigit;
 
 // const B: u64 = u32::MAX as u64;
@@ -107,6 +109,21 @@ impl<const N: usize> Num<N> {
 
     fn is_zero(&self) -> bool {
         self.msd == (N - 1)
+    }
+
+    #[must_use]
+    pub fn get_n(&self) -> usize {
+        N
+    }
+
+    #[must_use]
+    pub fn to_zeroed_string(&self) -> String {
+        let mut s = "0".repeat(N);
+        for i in self.msd..N {
+            s.replace_range(i..=i, &format!("{}", self.digits[i]));
+        }
+
+        s
     }
 }
 
@@ -352,6 +369,7 @@ fn correct_d_and_subtract<const N: usize>(x: &mut Num<N>, b: &Num<N>, d: &mut u3
 impl<const N: usize> Div for Num<N> {
     type Output = (Self, Self);
 
+    #[allow(unused)]
     fn div(mut self, mut divisor: Self) -> Self::Output {
         let mut qt: Num<N> = Self::from(0);
         let mut rm: Num<N> = Self::from(0);
@@ -406,6 +424,13 @@ impl<const N: usize> Div for Num<N> {
     }
 }
 
+// impl<const N: usize, const W: usize> From<Num<W>> for Num<N> where N != W {
+//     fn from(n: Num<W>) -> Self {
+//         let digits = n.to_digits();
+//         Self::new(&digits)
+//     }
+// }
+
 impl<const N: usize> From<u32> for Num<N> {
     fn from(n: u32) -> Self {
         let digits = n.to_digits();
@@ -425,6 +450,27 @@ impl<const N: usize> From<i32> for Num<N> {
         let mut real_rhs = Self::from(i);
         real_rhs.neg = signed;
         real_rhs
+    }
+}
+
+impl<const N: usize, const W: usize> NumFrom<N, W> for Num<N> {
+    type O<'a> = &'a Num<W>;
+
+    fn convert(&self, other: Self::O<'_>) -> Self {
+        if W > N {
+            return self.truncate(other);
+        }
+
+        Self::new(&other.digits[other.msd..W])
+    }
+
+    // W is always bigger here, which means that [u32; W] can be shrunk from W - N .. W
+    fn truncate(&self, other: Self::O<'_>) -> Self {
+        let slice = *other.digits;
+        let start_index = W - N;
+        let new_slice = &slice[start_index..W];
+
+        Self::new(new_slice)
     }
 }
 
@@ -464,6 +510,7 @@ impl<const N: usize> Display for Num<N> {
     }
 }
 
+#[allow(clippy::unwrap_used)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -635,6 +682,62 @@ mod tests {
 
             i += 1;
             fact *= i;
+        }
+
+        let r = Num::from(result);
+        assert_eq!(fact, r);
+    }
+
+    #[test]
+    fn test_convert_truncate() {
+        let n: Num<5> = Num::zero();
+        let z: Num<6> = Num::from(111_111);
+        let conv = n.convert(&z);
+        assert_eq!(n.get_n(), conv.get_n());
+        assert_eq!(*conv.digits, [1, 1, 1, 1, 1]);
+    }
+
+    #[test]
+    fn test_convert_upscale() {
+        let n: Num<100> = Num::zero();
+        let z: Num<6> = Num::from(111_111);
+        let conv = n.convert(&z);
+        let mut digits_cmp = "0"
+            .repeat(94)
+            .chars()
+            .map(|c| c.to_digit(10).unwrap())
+            .collect::<Vec<u32>>();
+        digits_cmp.append(&mut vec![1, 1, 1, 1, 1, 1]);
+        assert_eq!(n.get_n(), conv.get_n());
+        assert_eq!(Vec::from(*conv.digits), digits_cmp);
+    }
+
+    #[test]
+    fn test_convert_upscale_two() {
+        const N: usize = 18;
+        const Z: usize = 3;
+        let n: Num<N> = Num::zero();
+        let z: Num<Z> = Num::from(1);
+        let conv = n.convert(&z);
+        assert_eq!(N - conv.msd, Z - z.msd);
+    }
+
+    #[test]
+    fn factorial_upscale() {
+        let max: Num<2> = Num::from(16);
+        let mut i: Num<2> = Num::from(1);
+        let mut fact: Num<18> = Num::new(&[1]);
+        let result: u128 = (1..=16).product();
+
+        loop {
+            if i >= max {
+                break;
+            }
+            println!("{i}: {fact}");
+
+            i += 1;
+            let conv = fact.convert(&i);
+            fact *= conv;
         }
 
         let r = Num::from(result);
