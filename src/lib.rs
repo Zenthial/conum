@@ -1,29 +1,19 @@
 // Credit: https://mathsanew.com/articles/implementing_large_integers_introduction.pdf
 
 #![deny(clippy::pedantic, clippy::perf, clippy::style, clippy::unwrap_used)]
-// #![allow(unused)]
+#![allow(clippy::many_single_char_names)]
+mod to_digit;
 
 use std::cmp::Ordering;
 use std::fmt::Display;
-use std::ops::{Add, AddAssign, Div, Mul, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Div, Mul, MulAssign, Sub, SubAssign};
+
+use to_digit::ToDigit;
 
 // const B: u64 = u32::MAX as u64;
 const B: u64 = 10;
 
-fn digits_inner(n: u32, xs: &mut Vec<u32>) {
-    if n >= 10 {
-        digits_inner(n / 10, xs);
-    }
-    xs.push(n % 10);
-}
-
-fn to_digits(n: u32) -> Vec<u32> {
-    let mut xs = Vec::new();
-    digits_inner(n, &mut xs);
-    xs
-}
-
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Num<const N: usize> {
     pub(crate) digits: Box<[u32; N]>,
     pub(crate) msd: usize,
@@ -46,6 +36,16 @@ impl<const N: usize> Num<N> {
         }
     }
 
+    #[must_use]
+    pub fn zero() -> Self {
+        let dig = [0_u32; N];
+        Self {
+            digits: Box::new(dig),
+            msd: N - 1,
+            neg: false,
+        }
+    }
+
     fn update_msd(&mut self) {
         for i in 0..self.digits.len() {
             let d = self.digits[i];
@@ -58,26 +58,6 @@ impl<const N: usize> Num<N> {
 
     fn len(&self) -> usize {
         N - self.msd
-    }
-
-    fn cmp(&self, other: &Self) -> Ordering {
-        if self.msd == other.msd {
-            let self_digits = self.digits.iter();
-            let other_digits = other.digits.iter();
-            let zip = self_digits.zip(other_digits);
-
-            for (s, o) in zip {
-                match s.cmp(o) {
-                    Ordering::Less => return Ordering::Less,
-                    Ordering::Greater => return Ordering::Greater,
-                    Ordering::Equal => {}
-                }
-            }
-
-            return Ordering::Equal;
-        }
-
-        self.msd.cmp(&other.msd)
     }
 
     fn mul_digit(&self, s: u32, r: &mut Self) {
@@ -119,7 +99,7 @@ impl<const N: usize> Num<N> {
     }
 
     fn prefix(&mut self, src: &[u32]) {
-        self.msd = self.msd - src.len();
+        self.msd -= src.len();
         for i in self.msd..self.msd + src.len() {
             self.digits[i] = src[i - self.msd];
         }
@@ -130,15 +110,73 @@ impl<const N: usize> Num<N> {
     }
 }
 
+impl<const N: usize> Eq for Num<N> {}
+
+impl<const N: usize> PartialEq for Num<N> {
+    fn eq(&self, other: &Self) -> bool {
+        if self.msd == other.msd {
+            let self_digits = self.digits.iter();
+            let other_digits = other.digits.iter();
+            let zip = self_digits.zip(other_digits);
+
+            for (s, o) in zip {
+                if *s != *o {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        false
+    }
+}
+
+impl<const N: usize> PartialOrd for Num<N> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<const N: usize> Ord for Num<N> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        if self.msd == other.msd {
+            let self_digits = self.digits.iter();
+            let other_digits = other.digits.iter();
+            let zip = self_digits.zip(other_digits);
+
+            for (s, o) in zip {
+                match s.cmp(o) {
+                    Ordering::Less => return Ordering::Less,
+                    Ordering::Greater => return Ordering::Greater,
+                    Ordering::Equal => {}
+                }
+            }
+
+            return Ordering::Equal;
+        }
+
+        other.msd.cmp(&self.msd)
+    }
+}
+
 impl<const N: usize> Add for Num<N> {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
+        (&self).add(&rhs)
+    }
+}
+
+impl<const N: usize> Add<&Num<N>> for &Num<N> {
+    type Output = Num<N>;
+
+    fn add(self, rhs: &Num<N>) -> Self::Output {
         if rhs.len() > self.len() {
             return rhs.add(self);
         }
 
-        let mut r: Num<N> = Self::new(&[]);
+        let mut r: Num<N> = Num::new(&[]);
         let mut carry = false;
 
         for i in (self.msd..N).rev() {
@@ -179,9 +217,23 @@ impl<const N: usize> Add for Num<N> {
     }
 }
 
-impl<const N: usize> AddAssign for Num<N> {
-    fn add_assign(&mut self, rhs: Self) {
+impl<const N: usize> AddAssign<i32> for Num<N> {
+    fn add_assign(&mut self, rhs: i32) {
         let c = self.clone();
+        *self = c.add(Self::from(rhs));
+    }
+}
+
+impl<const N: usize> AddAssign<u32> for Num<N> {
+    fn add_assign(&mut self, rhs: u32) {
+        let c = self.clone();
+        *self = c.add(Self::from(rhs));
+    }
+}
+
+impl<const N: usize> AddAssign<&Num<N>> for Num<N> {
+    fn add_assign(&mut self, rhs: &Num<N>) {
+        let c = &self.clone();
         *self = c.add(rhs);
     }
 }
@@ -242,44 +294,58 @@ impl<const N: usize> Mul for Num<N> {
             return rhs.mul(self);
         }
 
-        let mut big_r: Num<N> = Self::new(&[]);
-        let mut r: Num<N> = Self::new(&[]);
-        self.mul_digit(rhs.digits[N - 1], &mut big_r);
-        for i in (self.msd..N).rev() {
+        let mut big_r: Num<N> = Self::zero();
+        let mut r: Num<N> = Self::zero();
+        self.mul_digit(rhs.digits[N - 1], &mut r);
+        for i in (rhs.msd..N - 1).rev() {
             self.mul_digit(rhs.digits[i], &mut big_r);
             big_r.shift_left(N - 1 - i);
-            r += big_r.clone();
+            r += &big_r;
         }
 
         r
     }
 }
 
+impl<const N: usize> MulAssign for Num<N> {
+    fn mul_assign(&mut self, rhs: Self) {
+        let c = self.clone();
+        *self = c.mul(rhs);
+    }
+}
+
+impl<const N: usize> MulAssign<&Num<N>> for Num<N> {
+    fn mul_assign(&mut self, rhs: &Num<N>) {
+        let c = self.clone();
+        let real_rhs = rhs.clone();
+        *self = c.mul(real_rhs);
+    }
+}
+
+impl<const N: usize> MulAssign<u32> for Num<N> {
+    fn mul_assign(&mut self, rhs: u32) {
+        let c = self.clone();
+        let real_rhs = Self::from(rhs);
+        *self = c.mul(real_rhs);
+    }
+}
+
 fn yz_from_x<const N: usize>(x: &Num<N>, w: usize) -> u32 {
     let iy = N - w;
-    let y;
-    let z;
 
-    if iy >= x.msd {
-        y = x.digits[iy];
-    } else {
-        y = 0;
-    }
+    let y = if iy >= x.msd { x.digits[iy] } else { 0 };
 
-    if iy + 1 >= x.msd {
-        z = x.digits[iy + 1];
-    } else {
-        z = 0
-    }
+    let z = if iy + 1 >= x.msd { x.digits[iy + 1] } else { 0 };
 
     let b = u32::try_from(B).expect("");
     y * b + z
 }
 
+#[allow(unused)]
 fn correct_d_and_subtract<const N: usize>(x: &mut Num<N>, b: &Num<N>, d: &mut u32) {
     let mut t: Num<N> = Num::from(0);
     if u64::from(*d) > B - 1 {
-        *d = u32::try_from(B - 1).unwrap();
+        *d = u32::try_from(B - 1).expect("u32 overflow");
     }
 }
 
@@ -293,9 +359,7 @@ impl<const N: usize> Div for Num<N> {
         let mut bf: Num<N> = Self::from(0);
         let mut x: Num<N> = Self::from(0);
 
-        if divisor.is_zero() {
-            panic!("divide by zero error");
-        }
+        assert!(!divisor.is_zero(), "divide by zero error");
 
         if self.len() < divisor.len() {
             rm = self;
@@ -303,7 +367,7 @@ impl<const N: usize> Div for Num<N> {
         }
 
         let mut e = divisor.digits[divisor.msd];
-        let b = u32::try_from(B).unwrap();
+        let b = u32::try_from(B).expect("u32 overflow");
 
         if divisor.len() > 1 && e < b / 2 {
             let f = b / (e + 1);
@@ -344,7 +408,29 @@ impl<const N: usize> Div for Num<N> {
 
 impl<const N: usize> From<u32> for Num<N> {
     fn from(n: u32) -> Self {
-        let digits = to_digits(n);
+        let digits = n.to_digits();
+        Self::new(&digits)
+    }
+}
+
+impl<const N: usize> From<i32> for Num<N> {
+    fn from(rhs: i32) -> Self {
+        let signed = rhs < 0;
+        let i = if signed {
+            u32::try_from(-rhs).expect("shouldnt fail")
+        } else {
+            u32::try_from(rhs).expect("shouldn't fail")
+        };
+
+        let mut real_rhs = Self::from(i);
+        real_rhs.neg = signed;
+        real_rhs
+    }
+}
+
+impl<const N: usize> From<u128> for Num<N> {
+    fn from(n: u128) -> Self {
+        let digits = n.to_digits();
         Self::new(&digits)
     }
 }
@@ -432,7 +518,7 @@ mod tests {
         let mut num1: Num<200> = Num::from(123);
         let num2: Num<200> = Num::from(123);
         let expected_result: Num<200> = Num::from(123 + 123);
-        num1 += num2;
+        num1 += &num2;
         assert_eq!(num1.digits, expected_result.digits);
     }
 
@@ -514,6 +600,14 @@ mod tests {
     }
 
     #[test]
+    fn test_zero_constructor() {
+        let n: Num<5> = Num::zero();
+        let z: Num<5> = Num::from(0);
+        assert_eq!(n.digits, z.digits);
+        assert_eq!(n.msd, z.msd);
+    }
+
+    #[test]
     fn test_prefix() {
         let mut n: Num<5> = Num::from(0);
         let expected_result: Num<5> = Num::from(1110);
@@ -525,5 +619,25 @@ mod tests {
     fn assert_print() {
         let n: Num<5> = Num::from(100);
         assert_eq!(format!("The number is: {n}"), "The number is: 100");
+    }
+
+    #[test]
+    fn factorial() {
+        let max = 20;
+        let mut i = 1_u32;
+        let mut fact: Num<20> = Num::new(&[1]);
+        let result: u128 = (1..=u128::from(max)).product();
+
+        loop {
+            if i >= max {
+                break;
+            }
+
+            i += 1;
+            fact *= i;
+        }
+
+        let r = Num::from(result);
+        assert_eq!(fact, r);
     }
 }
