@@ -7,7 +7,10 @@ pub struct Float<const N: usize, const W: usize> {
     pub(crate) decimal: Num<W>,
 }
 
-impl<const N: usize, const W: usize> Float<N, W> {
+impl<const N: usize, const W: usize> Float<N, W>
+where
+    [(); N + W]:,
+{
     #[must_use]
     pub fn new(num: i32, deci: i32) -> Self {
         Float {
@@ -25,17 +28,20 @@ impl<const N: usize, const W: usize> Float<N, W> {
     }
 
     fn actual_mul(&self, rhs: &Self) -> Self {
-        // let num_vec = Vec::from(*self.number.digits);
-        // let mut deci_vec = Vec::from(*self.decimal.digits);
-        // num_vec.append(&mut deci_vec);
-        //
-        // let scaled_self: Num<todo!()> = Num::new(&num_vec.to_owned());
+        let mut num_vec = Vec::from(*self.number.digits);
+        let mut deci_vec = Vec::from(*self.decimal.digits);
+        num_vec.append(&mut deci_vec);
+
+        let scaled_self: Num<{ N + W }> = Num::new(&num_vec.to_owned());
 
         todo!()
     }
 }
 
-impl<const N: usize, const W: usize> Add for Float<N, W> {
+impl<const N: usize, const W: usize> Add for Float<N, W>
+where
+    [(); N + W]:,
+{
     type Output = Float<N, W>;
     fn add(self, rhs: Self) -> Self::Output {
         let mut r: Self = Float::zero();
@@ -68,7 +74,10 @@ const fn sum(n: usize, w: usize) -> usize {
     n + w
 }
 
-impl<const N: usize, const W: usize> Mul for Float<N, W> {
+impl<const N: usize, const W: usize> Mul for Float<N, W>
+where
+    [(); N + W]:,
+{
     type Output = Float<N, W>;
     fn mul(self, rhs: Self) -> Self::Output {
         return self.actual_mul(&rhs);

@@ -2,6 +2,7 @@
 
 #![deny(clippy::pedantic, clippy::perf, clippy::style, clippy::unwrap_used)]
 #![allow(clippy::many_single_char_names)]
+#![feature(generic_const_exprs)]
 pub mod errors;
 pub mod float;
 pub mod int;
