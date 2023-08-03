@@ -839,4 +839,13 @@ mod tests {
         let (qt, _rm) = z / y;
         assert_eq!(*qt.digits, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     }
+
+    #[test]
+    fn div_test_rm() {
+        let z: Num<3> = Num::from(3);
+        let y: Num<3> = Num::from(1);
+        let (qt, rm) = y / z;
+        assert_eq!(*qt.digits, [0, 0, 1]);
+        assert_eq!(*rm.digits, [0, 0, 4]);
+    }
 }

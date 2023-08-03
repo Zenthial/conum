@@ -27,14 +27,28 @@ where
         }
     }
 
-    fn actual_mul(&self, rhs: &Self) -> Self {
-        let mut num_vec = Vec::from(*self.number.digits);
-        let mut deci_vec = Vec::from(*self.decimal.digits);
+    fn scale(&self) -> Num<{ N + W }> {
+        let mut num_vec = Vec::from(&self.number.digits[self.number.msd..]);
+        let mut deci_vec = Vec::from(&self.decimal.digits[self.decimal.msd..]);
         num_vec.append(&mut deci_vec);
+        println!("{num_vec:?}");
 
-        let scaled_self: Num<{ N + W }> = Num::new(&num_vec.to_owned());
+        Num::new(&*num_vec)
+    }
 
-        todo!()
+    fn actual_mul(&self, rhs: &Self) -> Self {
+        let scaled_self = self.scale();
+        let scaled_rhs = rhs.scale();
+        println!("{}{}", scaled_rhs.msd, scaled_self.msd);
+        let mul = scaled_self * scaled_rhs;
+
+        let new_num: Num<N> = Num::new(&mul.digits[0..N]);
+        let new_deci: Num<W> = Num::new(&mul.digits[N..]);
+
+        Self {
+            number: new_num,
+            decimal: new_deci,
+        }
     }
 }
 
@@ -70,10 +84,6 @@ where
     }
 }
 
-const fn sum(n: usize, w: usize) -> usize {
-    n + w
-}
-
 impl<const N: usize, const W: usize> Mul for Float<N, W>
 where
     [(); N + W]:,
@@ -102,5 +112,14 @@ mod tests {
         let res = f1 + f2;
         assert_eq!(*res.number.digits, [2, 0, 1]);
         assert_eq!(*res.decimal.digits, [0]);
+    }
+
+    #[test]
+    fn test_float_mul() {
+        let f1: Float<3, 2> = Float::new(3, 5);
+        let f2: Float<3, 2> = Float::new(2, 5);
+        let res = f1 * f2;
+        assert_eq!(*res.number.digits, [0, 0, 8]);
+        assert_eq!(*res.decimal.digits, [7, 5]);
     }
 }
