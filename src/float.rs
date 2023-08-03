@@ -25,11 +25,11 @@ impl<const N: usize, const W: usize> Float<N, W> {
     }
 
     fn actual_mul(&self, rhs: &Self) -> Self {
-        let num_vec = Vec::from(*self.number.digits);
-        let mut deci_vec = Vec::from(*self.decimal.digits);
-        num_vec.append(&mut deci_vec);
-
-        let scaled_self: Num<todo!()> = Num::new(&num_vec.to_owned());
+        // let num_vec = Vec::from(*self.number.digits);
+        // let mut deci_vec = Vec::from(*self.decimal.digits);
+        // num_vec.append(&mut deci_vec);
+        //
+        // let scaled_self: Num<todo!()> = Num::new(&num_vec.to_owned());
 
         todo!()
     }

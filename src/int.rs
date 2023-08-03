@@ -115,7 +115,7 @@ impl<const N: usize> Num<N> {
     }
 
     fn is_zero(&self) -> bool {
-        self.msd == (N - 1)
+        self.msd == (N - 1) && self.digits[self.msd] == 0
     }
 
     #[must_use]
@@ -388,24 +388,36 @@ fn yz_from_x<const N: usize>(x: &Num<N>, w: usize) -> u32 {
     y * b + z
 }
 
-#[allow(unused)]
 fn correct_d_and_subtract<const N: usize>(x: &mut Num<N>, b: &Num<N>, d: &mut u32) {
     let mut t: Num<N> = Num::from(0);
     if u64::from(*d) > B - 1 {
         *d = u32::try_from(B - 1).expect("u32 overflow");
     }
+
+    b.mul_digit(*d, &mut t).unwrap();
+
+    if t > *x {
+        *d -= 1;
+        t -= b.clone();
+        if t > *x {
+            *d -= 1;
+            t -= b.clone();
+        }
+    }
+
+    *x -= t;
 }
 
 impl<const N: usize> Div for Num<N> {
     type Output = (Self, Self);
 
-    #[allow(unused)]
     fn div(mut self, mut divisor: Self) -> Self::Output {
         let mut qt: Num<N> = Self::from(0);
-        let mut rm: Num<N> = Self::from(0);
+        let rm: Num<N>;
         let mut af: Num<N> = Self::from(0);
         let mut bf: Num<N> = Self::from(0);
-        let mut x: Num<N> = Self::from(0);
+        let mut x: Num<N> = Self::new(&[]);
+        let mut f = 1;
 
         assert!(!divisor.is_zero(), "divide by zero error");
 
@@ -418,9 +430,9 @@ impl<const N: usize> Div for Num<N> {
         let b = u32::try_from(B).expect("u32 overflow");
 
         if divisor.len() > 1 && e < b / 2 {
-            let f = b / (e + 1);
-            self.mul_digit(f, &mut af);
-            divisor.mul_digit(f, &mut bf);
+            f = b / (e + 1);
+            self.mul_digit(f, &mut af).unwrap();
+            divisor.mul_digit(f, &mut bf).unwrap();
             self = af;
             divisor = bf;
             e = divisor.digits[divisor.msd];
@@ -437,20 +449,35 @@ impl<const N: usize> Div for Num<N> {
                 m = b_len;
                 x.prefix(&self.digits[self.msd..self.msd + m]);
             } else {
-                x.shift_left(1);
-                x.digits[N - 1] = self.digits[self.msd + m];
                 m += 1;
+                x.shift_left(1);
+                x.digits[N - 1] = self.digits[self.msd + m - 1];
             }
 
-            let yz = yz_from_x(&x, b_len + 1);
+            let mut yz = yz_from_x(&x, b_len + 1);
             let mut d = yz / e;
 
             if b_len > 1 {
                 correct_d_and_subtract(&mut x, &divisor, &mut d);
+            } else {
+                yz -= e * d;
+                x = Num::from(yz);
             }
+
+            qt.digits[qt.msd + m - b_len] = d;
         }
 
-        todo!()
+        qt.update_msd();
+
+        if f > 1 {
+            let t1: Num<N> = Self::from(f);
+            let (r_rm, _) = x.div(t1);
+            rm = r_rm;
+        } else {
+            rm = x;
+        }
+
+        return (qt, rm);
     }
 }
 
@@ -544,6 +571,7 @@ impl<const N: usize> Display for Num<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::{thread_rng, Rng};
 
     #[test]
     fn check_msd_width_3() {
@@ -763,7 +791,6 @@ mod tests {
             if i >= max {
                 break;
             }
-            println!("{i}: {fact}");
 
             i += 1;
             let conv = fact.convert(&i);
@@ -772,5 +799,44 @@ mod tests {
 
         let r = Num::from(result);
         assert_eq!(fact, r);
+    }
+
+    #[test]
+    fn div() {
+        let z: Num<2> = Num::from(2);
+        let y: Num<2> = Num::from(8);
+        let (qt, _rm) = y / z;
+        assert_eq!(*qt.digits, [0, 4]);
+    }
+
+    #[test]
+    fn div_large() {
+        let z: Num<10> = Num::from(2);
+        let y: Num<10> = Num::from(800);
+        let (qt, _rm) = y / z;
+        assert_eq!(*qt.digits, [0, 0, 0, 0, 0, 0, 0, 4, 0, 0]);
+    }
+
+    #[test]
+    #[allow(non_snake_case)]
+    fn div_random() {
+        let mut rng = thread_rng();
+        for _ in 0..100 {
+            let Z = rng.gen_range(1..=10000);
+            let Y = rng.gen_range(1..Z);
+            let z: Num<5> = Num::from(Z);
+            let y: Num<5> = Num::from(Y);
+            let (qt, _rm) = z / y;
+            let result = Num::from(Z / Y);
+            assert_eq!(*qt.digits, *result.digits);
+        }
+    }
+
+    #[test]
+    fn div_large_reverse() {
+        let z: Num<10> = Num::from(2);
+        let y: Num<10> = Num::from(800);
+        let (qt, _rm) = z / y;
+        assert_eq!(*qt.digits, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     }
 }
