@@ -3,40 +3,44 @@ use std::fmt::Display;
 use std::ops::{Add, AddAssign, Div, Mul, MulAssign, Sub, SubAssign};
 
 use crate::errors::MathError;
-use crate::num_from::NumFrom;
+use crate::num_from::{FromSize, NumFrom};
 use crate::to_digit::ToDigit;
 
 const B: u64 = 10;
 
 #[derive(Clone, Debug)]
-pub struct Num<const N: usize> {
-    pub(crate) digits: Box<[u32; N]>,
+pub struct Num {
+    pub(crate) digits: Box<[u32]>,
     pub(crate) msd: usize,
     pub(crate) neg: bool,
+    pub(crate) size: usize,
 }
 
-impl<const N: usize> Num<N> {
+impl Num {
     #[must_use]
-    pub fn new(digits: &[u32]) -> Self {
-        let mut dig = [0_u32; N];
+    pub fn new(digits: &[u32], size: usize) -> Self {
+        // let mut dig = [0_u32; N];
+        let mut dig = Vec::with_capacity(size);
 
         for (i, d) in digits.iter().enumerate() {
-            dig[N - (digits.len() - i)] = *d;
+            dig[size - (digits.len() - i)] = *d;
         }
 
         Self {
-            digits: Box::new(dig),
-            msd: N - digits.len(),
+            digits: dig.into_boxed_slice(),
+            msd: size - digits.len(),
+            size,
             neg: false,
         }
     }
 
     #[must_use]
-    pub fn zero() -> Self {
-        let dig = [0_u32; N];
+    pub fn zero(size: usize) -> Self {
+        let dig = vec![0_u32; size];
         Self {
-            digits: Box::new(dig),
-            msd: N - 1,
+            digits: dig.into_boxed_slice(),
+            msd: size - 1,
+            size,
             neg: false,
         }
     }
@@ -52,17 +56,17 @@ impl<const N: usize> Num<N> {
     }
 
     fn len(&self) -> usize {
-        N - self.msd
+        self.size - self.msd
     }
 
-    fn mul_digit(&self, s: u32, r: &mut Self) -> Result<(), MathError<N>> {
+    fn mul_digit(&self, s: u32, r: &mut Self) -> Result<(), MathError> {
         let mut carry = 0_u64;
         if s == 0 {
             return Ok(());
         }
 
         let s_conv = u64::from(s);
-        for i in (self.msd..N).rev() {
+        for i in (self.msd..self.size).rev() {
             let d = u64::from(self.digits[i]) * s_conv + carry;
 
             carry = d / B;
@@ -95,7 +99,7 @@ impl<const N: usize> Num<N> {
 
     fn shift_left(&mut self, n: usize) {
         assert!(self.msd >= n, "shift left overflow");
-        if self.msd == N {
+        if self.is_zero() {
             // equals zero
             return;
         }
@@ -115,18 +119,18 @@ impl<const N: usize> Num<N> {
     }
 
     fn is_zero(&self) -> bool {
-        self.msd == (N - 1) && self.digits[self.msd] == 0
+        self.msd == (self.size - 1) && self.digits[self.msd] == 0
     }
 
     #[must_use]
     pub fn get_n(&self) -> usize {
-        N
+        self.size
     }
 
     #[must_use]
     pub fn to_zeroed_string(&self) -> String {
-        let mut s = "0".repeat(N);
-        for i in self.msd..N {
+        let mut s = "0".repeat(self.size);
+        for i in self.msd..self.size {
             s.replace_range(i..=i, &format!("{}", self.digits[i]));
         }
 
@@ -135,15 +139,15 @@ impl<const N: usize> Num<N> {
 
     /// # Errors
     /// todo!
-    pub fn checked_add(&self, rhs: &Self) -> Result<Self, MathError<N>> {
+    pub fn checked_add(&self, rhs: &Self) -> Result<Self, MathError> {
         if rhs.len() > self.len() {
             return rhs.checked_add(self);
         }
 
-        let mut r: Num<N> = Num::new(&[]);
+        let mut r = Num::new(&[], self.size);
         let mut carry = false;
 
-        for i in (self.msd..N).rev() {
+        for i in (self.msd..self.size).rev() {
             let mut d = u64::from(self.digits[i]);
 
             if carry || i >= rhs.msd {
@@ -187,17 +191,17 @@ impl<const N: usize> Num<N> {
 
     /// # Errors
     /// todo!
-    pub fn checked_mul(&self, rhs: &Self) -> Result<Self, MathError<N>> {
+    pub fn checked_mul(&self, rhs: &Self) -> Result<Self, MathError> {
         if self.len() < rhs.len() {
             return rhs.checked_mul(self);
         }
 
-        let mut big_r: Num<N> = Self::zero();
-        let mut r: Num<N> = Self::zero();
-        self.mul_digit(rhs.digits[N - 1], &mut r)?;
-        for i in (rhs.msd..N - 1).rev() {
+        let mut big_r: Num = Self::zero(self.size);
+        let mut r: Num = Self::zero(self.size);
+        self.mul_digit(rhs.digits[self.size - 1], &mut r)?;
+        for i in (rhs.msd..self.size - 1).rev() {
             self.mul_digit(rhs.digits[i], &mut big_r)?;
-            big_r.shift_left(N - 1 - i);
+            big_r.shift_left(self.size - 1 - i);
             r += &big_r;
         }
 
@@ -205,9 +209,9 @@ impl<const N: usize> Num<N> {
     }
 }
 
-impl<const N: usize> Eq for Num<N> {}
+impl Eq for Num {}
 
-impl<const N: usize> PartialEq for Num<N> {
+impl PartialEq for Num {
     fn eq(&self, other: &Self) -> bool {
         if self.msd == other.msd {
             let self_digits = self.digits.iter();
@@ -227,13 +231,13 @@ impl<const N: usize> PartialEq for Num<N> {
     }
 }
 
-impl<const N: usize> PartialOrd for Num<N> {
+impl PartialOrd for Num {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<const N: usize> Ord for Num<N> {
+impl Ord for Num {
     fn cmp(&self, other: &Self) -> Ordering {
         if self.msd == other.msd {
             let self_digits = self.digits.iter();
@@ -255,7 +259,7 @@ impl<const N: usize> Ord for Num<N> {
     }
 }
 
-impl<const N: usize> Add for Num<N> {
+impl Add for Num {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
@@ -263,10 +267,10 @@ impl<const N: usize> Add for Num<N> {
     }
 }
 
-impl<const N: usize> Add<&Num<N>> for &Num<N> {
-    type Output = Num<N>;
+impl Add<&Num> for &Num {
+    type Output = Num;
 
-    fn add(self, rhs: &Num<N>) -> Self::Output {
+    fn add(self, rhs: &Num) -> Self::Output {
         match self.checked_add(rhs) {
             Ok(output) => output,
             Err(e) => panic!("{}", e),
@@ -274,32 +278,32 @@ impl<const N: usize> Add<&Num<N>> for &Num<N> {
     }
 }
 
-impl<const N: usize> AddAssign<i32> for Num<N> {
+impl AddAssign<i32> for Num {
     fn add_assign(&mut self, rhs: i32) {
         let c = self.clone();
-        *self = c.add(Self::from(rhs));
+        *self = c.add(Self::from_with_size(rhs, self.size));
     }
 }
 
-impl<const N: usize> AddAssign<u32> for Num<N> {
+impl AddAssign<u32> for Num {
     fn add_assign(&mut self, rhs: u32) {
         let c = self.clone();
-        *self = c.add(Self::from(rhs));
+        *self = c.add(Self::from_with_size(rhs, self.size));
     }
 }
 
-impl<const N: usize> AddAssign<&Num<N>> for Num<N> {
-    fn add_assign(&mut self, rhs: &Num<N>) {
+impl AddAssign<&Num> for Num {
+    fn add_assign(&mut self, rhs: &Num) {
         let c = &self.clone();
         *self = c.add(rhs);
     }
 }
 
-impl<const N: usize> Sub for Num<N> {
+impl Sub for Num {
     type Output = Self;
 
-    fn sub(self, rhs: Num<N>) -> Self::Output {
-        let mut r: Num<N> = Self::new(&[]);
+    fn sub(self, rhs: Num) -> Self::Output {
+        let mut r: Num = Self::new(&[], self.size);
         let mut borrow = false;
         let mut neg = false;
 
@@ -307,7 +311,7 @@ impl<const N: usize> Sub for Num<N> {
             neg = true;
         }
 
-        for i in (self.msd..N).rev() {
+        for i in (self.msd..self.size).rev() {
             let mut d = i64::from(self.digits[i]);
 
             if borrow || i >= rhs.msd {
@@ -336,14 +340,14 @@ impl<const N: usize> Sub for Num<N> {
     }
 }
 
-impl<const N: usize> SubAssign for Num<N> {
+impl SubAssign for Num {
     fn sub_assign(&mut self, rhs: Self) {
         let c = self.clone();
         *self = c.sub(rhs);
     }
 }
 
-impl<const N: usize> Mul for Num<N> {
+impl Mul for Num {
     type Output = Self;
 
     fn mul(self, rhs: Self) -> Self::Output {
@@ -354,31 +358,31 @@ impl<const N: usize> Mul for Num<N> {
     }
 }
 
-impl<const N: usize> MulAssign for Num<N> {
+impl MulAssign for Num {
     fn mul_assign(&mut self, rhs: Self) {
         let c = self.clone();
         *self = c.mul(rhs);
     }
 }
 
-impl<const N: usize> MulAssign<&Num<N>> for Num<N> {
-    fn mul_assign(&mut self, rhs: &Num<N>) {
+impl MulAssign<&Num> for Num {
+    fn mul_assign(&mut self, rhs: &Num) {
         let c = self.clone();
         let real_rhs = rhs.clone();
         *self = c.mul(real_rhs);
     }
 }
 
-impl<const N: usize> MulAssign<u32> for Num<N> {
+impl MulAssign<u32> for Num {
     fn mul_assign(&mut self, rhs: u32) {
         let c = self.clone();
-        let real_rhs = Self::from(rhs);
+        let real_rhs = Self::from_with_size(rhs, self.size);
         *self = c.mul(real_rhs);
     }
 }
 
-fn yz_from_x<const N: usize>(x: &Num<N>, w: usize) -> u32 {
-    let iy = N - w;
+fn yz_from_x(x: &Num, w: usize) -> u32 {
+    let iy = x.size - w;
 
     let y = if iy >= x.msd { x.digits[iy] } else { 0 };
 
@@ -388,8 +392,8 @@ fn yz_from_x<const N: usize>(x: &Num<N>, w: usize) -> u32 {
     y * b + z
 }
 
-fn correct_d_and_subtract<const N: usize>(x: &mut Num<N>, b: &Num<N>, d: &mut u32) {
-    let mut t: Num<N> = Num::from(0);
+fn correct_d_and_subtract(x: &mut Num, b: &Num, d: &mut u32) {
+    let mut t: Num = Num::from_with_size(0, x.size);
     if u64::from(*d) > B - 1 {
         *d = u32::try_from(B - 1).expect("u32 overflow");
     }
@@ -408,15 +412,15 @@ fn correct_d_and_subtract<const N: usize>(x: &mut Num<N>, b: &Num<N>, d: &mut u3
     *x -= t;
 }
 
-impl<const N: usize> Div for Num<N> {
+impl Div for Num {
     type Output = (Self, Self);
 
     fn div(mut self, mut divisor: Self) -> Self::Output {
-        let mut qt: Num<N> = Self::from(0);
-        let rm: Num<N>;
-        let mut af: Num<N> = Self::from(0);
-        let mut bf: Num<N> = Self::from(0);
-        let mut x: Num<N> = Self::new(&[]);
+        let mut qt: Num = Self::from_with_size(0, self.size);
+        let rm: Num;
+        let mut af: Num = Self::from_with_size(0, self.size);
+        let mut bf: Num = Self::from_with_size(0, self.size);
+        let mut x: Num = Self::new(&[], self.size);
         let mut f = 1;
 
         assert!(!divisor.is_zero(), "divide by zero error");
@@ -441,7 +445,7 @@ impl<const N: usize> Div for Num<N> {
         let a_len = self.len();
         let b_len = divisor.len();
 
-        qt.msd = N - (a_len - b_len + 1);
+        qt.msd = self.size - (a_len - b_len + 1);
 
         let mut m = 0;
         while m < a_len {
@@ -451,7 +455,7 @@ impl<const N: usize> Div for Num<N> {
             } else {
                 m += 1;
                 x.shift_left(1);
-                x.digits[N - 1] = self.digits[self.msd + m - 1];
+                x.digits[self.size - 1] = self.digits[self.msd + m - 1];
             }
 
             let mut yz = yz_from_x(&x, b_len + 1);
@@ -461,7 +465,7 @@ impl<const N: usize> Div for Num<N> {
                 correct_d_and_subtract(&mut x, &divisor, &mut d);
             } else {
                 yz -= e * d;
-                x = Num::from(yz);
+                x = Num::from_with_size(yz, self.size);
             }
 
             qt.digits[qt.msd + m - b_len] = d;
@@ -470,7 +474,7 @@ impl<const N: usize> Div for Num<N> {
         qt.update_msd();
 
         if f > 1 {
-            let t1: Num<N> = Self::from(f);
+            let t1: Num = Self::from_with_size(f, self.size);
             let (r_rm, _) = x.div(t1);
             rm = r_rm;
         } else {
@@ -481,22 +485,22 @@ impl<const N: usize> Div for Num<N> {
     }
 }
 
-// impl<const N: usize, const W: usize> From<Num<W>> for Num<N> where N != W {
-//     fn from(n: Num<W>) -> Self {
+// impl<const N: usize, const W: usize> From<Num<W>> for Num where N != W {
+//     fn from_with_size(n: Num<W>) -> Self {
 //         let digits = n.to_digits();
 //         Self::new(&digits)
 //     }
 // }
 
-impl<const N: usize> From<u32> for Num<N> {
-    fn from(n: u32) -> Self {
+impl FromSize<u32> for Num {
+    fn from_with_size(n: u32, size: usize) -> Self {
         let digits = n.to_digits();
-        Self::new(&digits)
+        Self::new(&digits, size)
     }
 }
 
-impl<const N: usize> From<i32> for Num<N> {
-    fn from(rhs: i32) -> Self {
+impl FromSize<i32> for Num {
+    fn from_with_size(rhs: i32, size: usize) -> Self {
         let signed = rhs < 0;
         let i = if signed {
             u32::try_from(-rhs).expect("shouldnt fail")
@@ -504,62 +508,62 @@ impl<const N: usize> From<i32> for Num<N> {
             u32::try_from(rhs).expect("shouldn't fail")
         };
 
-        let mut real_rhs = Self::from(i);
+        let mut real_rhs = Self::from_with_size(i, size);
         real_rhs.neg = signed;
         real_rhs
     }
 }
 
-impl<const N: usize, const W: usize> NumFrom<N, W> for Num<N> {
-    type O<'a> = &'a Num<W>;
+impl NumFrom for Num {
+    type O<'a> = &'a Num;
 
     fn convert(&self, other: Self::O<'_>) -> Self {
-        if W > N {
+        if other.size > self.size {
             return self.truncate(other);
         }
 
-        Self::new(&other.digits[other.msd..W])
+        Self::new(&other.digits[other.msd..other.size], self.size)
     }
 
     // W is always bigger here, which means that [u32; W] can be shrunk from W - N .. W
     fn truncate(&self, other: Self::O<'_>) -> Self {
-        let slice = *other.digits;
-        let start_index = W - N;
-        let new_slice = &slice[start_index..W];
+        let slice = &other.digits;
+        let start_index = other.size - self.size;
+        let new_slice = &slice[start_index..other.size];
 
-        Self::new(new_slice)
+        Self::new(new_slice, self.size)
     }
 }
 
-impl<const N: usize> From<u128> for Num<N> {
-    fn from(n: u128) -> Self {
+impl FromSize<u128> for Num {
+    fn from_with_size(n: u128, size: usize) -> Self {
         let digits = n.to_digits();
-        Self::new(&digits)
+        Self::new(&digits, size)
     }
 }
 
-impl<const N: usize> From<String> for Num<N> {
-    fn from(s: String) -> Self {
+impl FromSize<String> for Num {
+    fn from_with_size(s: String, size: usize) -> Self {
         let digits: Vec<u32> = s
             .chars()
             .collect::<Vec<char>>()
             .iter()
             .map(|c| c.to_digit(10).expect("not a digit"))
             .collect();
-        Self::new(&digits)
+        Self::new(&digits, size)
     }
 }
 
-impl<const N: usize> From<&str> for Num<N> {
-    fn from(s: &str) -> Self {
-        Self::from(s.to_string())
+impl FromSize<&str> for Num {
+    fn from_with_size(s: &str, size: usize) -> Self {
+        Self::from_with_size(s.to_string(), size)
     }
 }
 
-impl<const N: usize> Display for Num<N> {
+impl Display for Num {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut s = String::new();
-        for i in self.msd..N {
+        for i in self.msd..self.size {
             s += &format!("{}", self.digits[i]);
         }
 
@@ -575,13 +579,13 @@ mod tests {
 
     #[test]
     fn check_msd_width_3() {
-        let num: Num<3> = Num::new(&[1, 2, 3]);
+        let num = Num::new(&[1, 2, 3], 3);
         assert_eq!(0, num.msd);
     }
 
     #[test]
     fn check_msd_width_200() {
-        let num: Num<200> = Num::new(&[1, 2, 3]);
+        let num = Num::new(&[1, 2, 3], 200);
         assert_eq!(197, num.msd);
         assert_eq!(1, num.digits[num.msd]);
         assert_eq!(2, num.digits[num.msd + 1]);
@@ -590,139 +594,139 @@ mod tests {
 
     #[test]
     fn check_from() {
-        let num1: Num<200> = Num::new(&[1, 2, 3]);
-        let num2: Num<200> = Num::from(123);
+        let num1 = Num::new(&[1, 2, 3], 200);
+        let num2 = Num::from_with_size(123, 200);
         assert_eq!(num1.digits, num2.digits);
     }
 
     #[test]
     fn check_from_string() {
-        let num1: Num<200> = Num::from(123);
-        let num2: Num<200> = Num::from("123");
+        let num1 = Num::from_with_size(123, 200);
+        let num2 = Num::from_with_size("123", 200);
         assert_eq!(num1.digits, num2.digits);
     }
 
     #[test]
     fn test_add() {
-        let num1: Num<200> = Num::from(123);
-        let num2: Num<200> = Num::from(123);
-        let expected_result: Num<200> = Num::from(123 + 123);
+        let num1 = Num::from_with_size(123, 200);
+        let num2 = Num::from_with_size(123, 200);
+        let expected_result = Num::from_with_size(123 + 123, 200);
         assert_eq!((num1 + num2).digits, expected_result.digits);
     }
 
     #[test]
     fn test_add_empty() {
-        let num1: Num<200> = Num::from(123);
-        let num2: Num<200> = Num::new(&[]);
-        let expected_result: Num<200> = Num::from(123);
+        let num1 = Num::from_with_size(123, 200);
+        let num2 = Num::new(&[], 200);
+        let expected_result = Num::from_with_size(123, 200);
         assert_eq!((num1 + num2).digits, expected_result.digits);
     }
 
     #[test]
     fn test_add_assign() {
-        let mut num1: Num<200> = Num::from(123);
-        let num2: Num<200> = Num::from(123);
-        let expected_result: Num<200> = Num::from(123 + 123);
+        let mut num1 = Num::from_with_size(123, 200);
+        let num2 = Num::from_with_size(123, 200);
+        let expected_result = Num::from_with_size(123 + 123, 200);
         num1 += &num2;
         assert_eq!(num1.digits, expected_result.digits);
     }
 
     #[test]
     fn test_sub() {
-        let num1: Num<200> = Num::from(123);
-        let num2: Num<200> = Num::from(100);
-        let expected_result: Num<200> = Num::from(123 - 100);
+        let num1 = Num::from_with_size(123, 200);
+        let num2 = Num::from_with_size(100, 200);
+        let expected_result = Num::from_with_size(123 - 100, 200);
         assert_eq!((num1 - num2).digits, expected_result.digits);
     }
 
     #[test]
     fn test_sub_assign() {
-        let mut num1: Num<200> = Num::from(123);
-        let num2: Num<200> = Num::from(100);
-        let expected_result: Num<200> = Num::from(123 - 100);
+        let mut num1 = Num::from_with_size(123, 200);
+        let num2 = Num::from_with_size(100, 200);
+        let expected_result = Num::from_with_size(123 - 100, 200);
         num1 -= num2;
         assert_eq!(num1.digits, expected_result.digits);
     }
 
     #[test]
     fn test_sub_underflow() {
-        let num1: Num<200> = Num::from(123);
-        let num2: Num<200> = Num::from(100);
+        let num1 = Num::from_with_size(123, 200);
+        let num2 = Num::from_with_size(100, 200);
         assert!((num2 - num1).neg);
     }
 
     #[test]
     fn test_add_overflow() {
-        let num1: Num<200> = Num::from(129);
-        let num2: Num<200> = Num::from(123);
-        let expected_result: Num<200> = Num::from(129 + 123);
+        let num1 = Num::from_with_size(129, 200);
+        let num2 = Num::from_with_size(123, 200);
+        let expected_result = Num::from_with_size(129 + 123, 200);
         assert_eq!((num1 + num2).digits, expected_result.digits);
     }
 
     #[test]
     fn test_mul_digit() {
-        let num1: Num<10> = Num::from(55);
-        let mut r: Num<10> = Num::new(&[]);
-        let expected_result: Num<10> = Num::from(55 * 9);
+        let num1 = Num::from_with_size(55, 10);
+        let mut r = Num::new(&[], 10);
+        let expected_result = Num::from_with_size(55 * 9, 10);
         num1.mul_digit(9, &mut r).unwrap();
         assert_eq!(r.digits, expected_result.digits);
     }
 
     #[test]
     fn test_shift_left() {
-        let mut num1: Num<10> = Num::from(55);
-        let expected_result: Num<10> = Num::from(5500);
+        let mut num1 = Num::from_with_size(55, 10);
+        let expected_result = Num::from_with_size(5500, 10);
         num1.shift_left(2);
         assert_eq!(num1.digits, expected_result.digits);
     }
 
     #[test]
     fn test_shift_left_2() {
-        let mut num1: Num<10> = Num::from(5);
-        let expected_result: Num<10> = Num::from(50);
+        let mut num1 = Num::from_with_size(5, 10);
+        let expected_result = Num::from_with_size(50, 10);
         num1.shift_left(1);
         assert_eq!(num1.digits, expected_result.digits);
     }
 
     #[test]
     fn test_mul() {
-        let num1: Num<10> = Num::from(5);
-        let num2: Num<10> = Num::from(5);
-        let expected_result: Num<10> = Num::from(5 * 5);
+        let num1 = Num::from_with_size(5, 10);
+        let num2 = Num::from_with_size(5, 10);
+        let expected_result = Num::from_with_size(5 * 5, 10);
         assert_eq!((num1 * num2).digits, expected_result.digits);
     }
 
     #[test]
     fn assert_len() {
-        let n: Num<5> = Num::from(100);
+        let n = Num::from_with_size(100, 5);
         assert_eq!(n.len(), 3);
     }
 
     #[test]
     fn test_msd_zero() {
-        let n: Num<5> = Num::from(0);
+        let n = Num::from_with_size(0, 5);
         assert_eq!(n.msd, 4);
     }
 
     #[test]
     fn test_zero_constructor() {
-        let n: Num<5> = Num::zero();
-        let z: Num<5> = Num::from(0);
+        let n = Num::zero(5);
+        let z = Num::from_with_size(5, 5);
         assert_eq!(n.digits, z.digits);
         assert_eq!(n.msd, z.msd);
     }
 
     #[test]
     fn test_prefix() {
-        let mut n: Num<5> = Num::from(0);
-        let expected_result: Num<5> = Num::from(1110);
+        let mut n = Num::from_with_size(0, 5);
+        let expected_result = Num::from_with_size(1110, 5);
         n.prefix(&[1, 1, 1]);
         assert_eq!(n.digits, expected_result.digits);
     }
 
     #[test]
     fn assert_print() {
-        let n: Num<5> = Num::from(100);
+        let n = Num::from_with_size(100, 5);
         assert_eq!(format!("The number is: {n}"), "The number is: 100");
     }
 
@@ -730,7 +734,7 @@ mod tests {
     fn factorial() {
         let max = 20;
         let mut i = 1_u32;
-        let mut fact: Num<20> = Num::new(&[1]);
+        let mut fact = Num::new(&[1], 20);
         let result: u128 = (1..=u128::from(max)).product();
 
         loop {
@@ -742,14 +746,14 @@ mod tests {
             fact *= i;
         }
 
-        let r = Num::from(result);
+        let r = Num::from_with_size(result, 18);
         assert_eq!(fact, r);
     }
 
     #[test]
     fn test_convert_truncate() {
-        let n: Num<5> = Num::zero();
-        let z: Num<6> = Num::from(111_111);
+        let n = Num::zero(5);
+        let z = Num::from_with_size(111_111, 6);
         let conv = n.convert(&z);
         assert_eq!(n.get_n(), conv.get_n());
         assert_eq!(*conv.digits, [1, 1, 1, 1, 1]);
@@ -757,8 +761,8 @@ mod tests {
 
     #[test]
     fn test_convert_upscale() {
-        let n: Num<100> = Num::zero();
-        let z: Num<6> = Num::from(111_111);
+        let n = Num::zero(100);
+        let z = Num::from_with_size(111_111, 6);
         let conv = n.convert(&z);
         let mut digits_cmp = "0"
             .repeat(94)
@@ -767,24 +771,24 @@ mod tests {
             .collect::<Vec<u32>>();
         digits_cmp.append(&mut vec![1, 1, 1, 1, 1, 1]);
         assert_eq!(n.get_n(), conv.get_n());
-        assert_eq!(Vec::from(*conv.digits), digits_cmp);
+        assert_eq!(Vec::from(&*conv.digits), digits_cmp);
     }
 
     #[test]
     fn test_convert_upscale_two() {
         const N: usize = 18;
         const Z: usize = 3;
-        let n: Num<N> = Num::zero();
-        let z: Num<Z> = Num::from(1);
+        let n: Num = Num::zero(2);
+        let z = Num::from_with_size(1, Z);
         let conv = n.convert(&z);
         assert_eq!(N - conv.msd, Z - z.msd);
     }
 
     #[test]
     fn factorial_upscale() {
-        let max: Num<2> = Num::from(16);
-        let mut i: Num<2> = Num::from(1);
-        let mut fact: Num<18> = Num::new(&[1]);
+        let max = Num::from_with_size(16, 2);
+        let mut i = Num::from_with_size(1, 2);
+        let mut fact = Num::new(&[1], 18);
         let result: u128 = (1..=16).product();
 
         loop {
@@ -797,22 +801,22 @@ mod tests {
             fact *= conv;
         }
 
-        let r = Num::from(result);
+        let r = Num::from_with_size(result, 18);
         assert_eq!(fact, r);
     }
 
     #[test]
     fn div() {
-        let z: Num<2> = Num::from(2);
-        let y: Num<2> = Num::from(8);
+        let z = Num::from_with_size(2, 2);
+        let y = Num::from_with_size(8, 2);
         let (qt, _rm) = y / z;
         assert_eq!(*qt.digits, [0, 4]);
     }
 
     #[test]
     fn div_large() {
-        let z: Num<10> = Num::from(2);
-        let y: Num<10> = Num::from(800);
+        let z = Num::from_with_size(2, 10);
+        let y = Num::from_with_size(800, 10);
         let (qt, _rm) = y / z;
         assert_eq!(*qt.digits, [0, 0, 0, 0, 0, 0, 0, 4, 0, 0]);
     }
@@ -824,18 +828,18 @@ mod tests {
         for _ in 0..100 {
             let Z = rng.gen_range(1..=10000);
             let Y = rng.gen_range(1..Z);
-            let z: Num<5> = Num::from(Z);
-            let y: Num<5> = Num::from(Y);
+            let z = Num::from_with_size(Z, 5);
+            let y = Num::from_with_size(Y, 5);
             let (qt, _rm) = z / y;
-            let result = Num::from(Z / Y);
+            let result = Num::from_with_size(Z / Y, 5);
             assert_eq!(*qt.digits, *result.digits);
         }
     }
 
     #[test]
     fn div_large_reverse() {
-        let z: Num<10> = Num::from(2);
-        let y: Num<10> = Num::from(800);
+        let z = Num::from_with_size(2, 10);
+        let y = Num::from_with_size(800, 10);
         let (qt, _rm) = z / y;
         assert_eq!(*qt.digits, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     }

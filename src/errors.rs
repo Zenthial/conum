@@ -2,12 +2,12 @@ use crate::Num;
 use std::fmt::{Display, Formatter, Result};
 
 #[derive(Debug)]
-pub enum MathError<const N: usize> {
-    Overflow(Num<N>),
+pub enum MathError {
+    Overflow(Num),
     ConversionError,
 }
 
-impl<const N: usize> Display for MathError<N> {
+impl Display for MathError {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         match self {
             MathError::Overflow(_) => write!(f, "Overflow"),
